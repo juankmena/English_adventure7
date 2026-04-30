@@ -27,6 +27,12 @@ CUSTOM_CSS = """
 .small {font-size: 0.9rem; opacity: .85;}
 .big-score {font-size: 2.2rem; font-weight: 800;}
 .badge {display:inline-block; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(120,120,120,.35); margin: 2px; font-size: .85rem;}
+.feedback-card {border-radius:18px; padding:16px 18px; margin:10px 0 6px 0; border:1px solid rgba(120,120,120,.25); background:linear-gradient(135deg, rgba(255,245,207,.65), rgba(255,255,255,.9));}
+.feedback-emoji {font-size: 3rem; line-height: 1;}
+.feedback-title {font-size: 1.25rem; font-weight: 800; margin-bottom: 4px;}
+.feedback-text {font-size: 1rem;}
+.level-box {border:1px solid rgba(120,120,120,.25); border-radius:16px; padding:12px; margin-top:6px; background: rgba(255,255,255,.03);}
+.xp-pill {display:inline-block; padding:6px 12px; border-radius:999px; background:#f6f3d2; border:1px solid rgba(120,120,120,.25); font-weight:700; margin-top:6px;}
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -215,6 +221,90 @@ def speak_button(text, label="🔊 Listen"):
         </script>
     """, height=45)
 
+
+def trigger_confetti():
+    st.components.v1.html("""
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script>
+    const duration = 1200;
+    const end = Date.now() + duration;
+    (function frame() {
+      confetti({particleCount: 5, angle: 60, spread: 70, origin: {x: 0}});
+      confetti({particleCount: 5, angle: 120, spread: 70, origin: {x: 1}});
+      if (Date.now() < end) requestAnimationFrame(frame);
+    }());
+    </script>
+    """, height=0)
+
+
+def play_success_sound():
+    st.components.v1.html("""
+    <script>
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioContext();
+    function tone(freq, start, duration){
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      gain.gain.setValueAtTime(0.001, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + duration + 0.02);
+    }
+    tone(523.25, 0.00, 0.16);
+    tone(659.25, 0.14, 0.18);
+    tone(783.99, 0.30, 0.22);
+    </script>
+    """, height=0)
+
+
+def level_info(xp):
+    level = xp // 100 + 1
+    progress = xp % 100
+    remaining = 100 - progress if progress != 0 else 100
+    return {"level": level, "progress": progress, "remaining": remaining}
+
+
+def render_level_box(xp):
+    info = level_info(xp)
+    st.markdown(f"""
+    <div class='level-box'>
+        <div><b>🎮 Level {info['level']}</b></div>
+        <div class='small'>Progress to next level</div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.progress(info['progress'] / 100 if info['progress'] else 0)
+    st.markdown(f"<div class='xp-pill'>⭐ XP: {xp} &nbsp;|&nbsp; {info['remaining']} XP to Level {info['level'] + 1}</div>", unsafe_allow_html=True)
+
+
+def show_answer_feedback(correct, explain, correct_answer=None):
+    if correct:
+        st.balloons()
+        trigger_confetti()
+        play_success_sound()
+        st.markdown("""
+        <div class='feedback-card'>
+            <div class='feedback-emoji'>🐱👍</div>
+            <div class='feedback-title'>Correct! Great job!</div>
+            <div class='feedback-text'>The cat says thumbs up — keep going! <b>+10 XP</b></div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.success("✅ Correct!")
+    else:
+        st.markdown("""
+        <div class='feedback-card'>
+            <div class='feedback-emoji'>🐱💭</div>
+            <div class='feedback-title'>Almost there!</div>
+            <div class='feedback-text'>Try again and use the hint below. You still earn <b>+2 XP</b> for practicing.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.error(f"❌ Not yet. Correct answer: {correct_answer}")
+    st.info(explain or "Keep practicing.")
+
 # -----------------------------
 # Progress
 # -----------------------------
@@ -323,12 +413,8 @@ def render_question(world, q, idx):
             return
         correct = check_answer(q, response)
         record_result(world, correct, q["q"], str(response))
-        if correct:
-            st.success("✅ Correct!")
-        else:
-            ans = q.get("answer")
-            st.error(f"❌ Not yet. Correct answer: {ans}")
-        st.info(q.get("explain", "Keep practicing."))
+        ans = q.get("answer")
+        show_answer_feedback(correct, q.get("explain", "Keep practicing."), ans)
 
 
 def quiz_world(world):
@@ -419,8 +505,25 @@ def writing_lab():
         ok, feedback = validate_writing(text, task)
         record_result("Writing Lab", ok, task["title"], text)
         if ok:
+            st.balloons()
+            trigger_confetti()
+            play_success_sound()
+            st.markdown("""
+            <div class='feedback-card'>
+                <div class='feedback-emoji'>🐱👍</div>
+                <div class='feedback-title'>Good work!</div>
+                <div class='feedback-text'>Your sentence follows the topic well. <b>+10 XP</b></div>
+            </div>
+            """, unsafe_allow_html=True)
             st.success("✅ Good work!")
         else:
+            st.markdown("""
+            <div class='feedback-card'>
+                <div class='feedback-emoji'>🐱💭</div>
+                <div class='feedback-title'>Almost there!</div>
+                <div class='feedback-text'>Review the notes below and try again. <b>+2 XP</b> for practicing.</div>
+            </div>
+            """, unsafe_allow_html=True)
             st.error("❌ Needs revision.")
         for f in feedback:
             st.write("- " + f)
@@ -479,6 +582,25 @@ def reading_challenge():
             notes.append("Write how the problem was solved.")
         ok = score >= 4
         record_result("Reading Challenge", ok, "story elements", f"score {score}/5")
+        if ok:
+            st.balloons()
+            trigger_confetti()
+            play_success_sound()
+            st.markdown("""
+            <div class='feedback-card'>
+                <div class='feedback-emoji'>🐱👍</div>
+                <div class='feedback-title'>Nice reading work!</div>
+                <div class='feedback-text'>You identified the story elements very well. <b>+10 XP</b></div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class='feedback-card'>
+                <div class='feedback-emoji'>🐱💭</div>
+                <div class='feedback-title'>Keep reading!</div>
+                <div class='feedback-text'>You are close — review the story details below. <b>+2 XP</b> for practicing.</div>
+            </div>
+            """, unsafe_allow_html=True)
         st.progress(score / 5)
         st.write(f"Score: {score}/5")
         for n in notes:
@@ -521,14 +643,18 @@ def dashboard():
     profile = get_stats()
     xp = profile.get("xp", 0)
     worlds = profile.get("worlds", {})
-    c1, c2, c3 = st.columns(3)
+    render_level_box(xp)
+    info = level_info(xp)
+    c1, c2, c3, c4 = st.columns(4)
     total_correct = sum(v.get("correct", 0) for v in worlds.values())
     total_wrong = sum(v.get("wrong", 0) for v in worlds.values())
     with c1:
         st.metric("XP", xp)
     with c2:
-        st.metric("Correct", total_correct)
+        st.metric("Level", info["level"])
     with c3:
+        st.metric("Correct", total_correct)
+    with c4:
         st.metric("Needs practice", total_wrong)
 
     st.subheader("By world")
@@ -787,9 +913,10 @@ def home():
     st.markdown("Hybrid practice app: game-style worlds + tutor-style feedback.")
     st.markdown("""
     <div class='card'>
-    <b>Includes:</b> login, user progress, XP, all worlds, writing validation, reading comprehension, idioms, and audio buttons in English.
+    <b>Includes:</b> login, user progress, XP, levels, all worlds, writing validation, reading comprehension, idioms, audio buttons in English, and celebration effects.
     </div>
     """, unsafe_allow_html=True)
+    render_level_box(get_stats().get("xp", 0))
     st.subheader("Worlds")
     cols = st.columns(3)
     worlds = list(QUIZ.keys()) + ["Writing Lab", "Reading Challenge"]
@@ -808,7 +935,7 @@ def app_shell():
         st.markdown(f"### 👤 {st.session_state.user}")
         st.caption(role_badge)
         profile = get_stats()
-        st.metric("XP", profile.get("xp", 0))
+        render_level_box(profile.get("xp", 0))
         menu_items = ["Home", "Study Cards", "Dashboard"]
         if is_admin():
             menu_items.append("Admin Panel")
