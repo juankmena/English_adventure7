@@ -6,7 +6,8 @@ import hashlib
 import html
 import csv
 import io
-from datetime import datetime
+import sqlite3
+from datetime import datetime, date
 
 import streamlit as st
 
@@ -15,6 +16,7 @@ from data.questions import QUIZ, UNIT1_WORDS, UNIT2_WORDS, IDIOMS, READING_TEXT,
 APP_TITLE = "English Adventure 7th Grade"
 USERS_FILE = "storage/users.json"
 PROGRESS_FILE = "storage/progress.json"
+DB_FILE = "storage/english_adventure.sqlite3"
 DEFAULT_ADMIN_USER = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin123"
 
@@ -33,6 +35,10 @@ CUSTOM_CSS = """
 .feedback-text {font-size: 1rem;}
 .level-box {border:1px solid rgba(120,120,120,.25); border-radius:16px; padding:12px; margin-top:6px; background: rgba(255,255,255,.03);}
 .xp-pill {display:inline-block; padding:6px 12px; border-radius:999px; background:#f6f3d2; border:1px solid rgba(120,120,120,.25); font-weight:700; margin-top:6px;}
+.mascot {font-size:4rem; text-align:center;}
+.mission {border:1px solid rgba(120,120,120,.25); border-radius:14px; padding:12px; margin:8px 0;}
+.heart {font-size:1.3rem;}
+.badge-card {border-radius:14px; padding:12px; margin:8px 0; border:1px solid rgba(120,120,120,.25); background: rgba(255,255,255,.04);}
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -122,6 +128,8 @@ def ensure_files():
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({}, f)
 
+    init_sqlite()
+
     # Create a default administrator if it does not exist.
     # You can change this password from Admin Panel after first login.
     try:
@@ -171,6 +179,54 @@ def save_json(path, data):
 
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+def init_sqlite():
+    os.makedirs("storage", exist_ok=True)
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
+            time TEXT,
+            world TEXT,
+            correct INTEGER,
+            question TEXT,
+            detail TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS app_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
+            time TEXT,
+            event_type TEXT,
+            detail TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def mirror_attempt_sqlite(username, world, correct, question, detail):
+    try:
+        init_sqlite()
+        conn = sqlite3.connect(DB_FILE)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO attempts(username, time, world, correct, question, detail) VALUES (?, ?, ?, ?, ?, ?)",
+            (username, datetime.now().isoformat(timespec="seconds"), world, int(bool(correct)), question[:160], detail[:200])
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def today_str():
+    return date.today().isoformat()
+
+
 
 
 def is_admin(username=None):
@@ -317,6 +373,55 @@ def user_progress():
     return data
 
 
+def calculate_badges(profile):
+    worlds = profile.get("worlds", {})
+    badges = set(profile.get("badges", []))
+    badge_rules = {
+        "Vocabulary Unit 1": "🏕️ Unit 1 Explorer",
+        "Vocabulary Unit 2": "🎭 Unit 2 Master",
+        "Past Simple": "⏳ Past Simple Hero",
+        "Past Continuous": "🎬 Past Continuous Star",
+        "Prepositions of Time": "🕒 Time Preposition Champion",
+        "Adverbs": "⚡ Adverb Pro",
+        "Infinitives and Gerunds": "🧩 Gerund/Infinitive Solver",
+        "Present Continuous as Future": "📅 Future Planner",
+        "Prepositions": "📍 Preposition Navigator",
+        "Adjectives Fact and Opinion": "🎨 Adjective Expert",
+        "Idioms": "💬 Idiom Genius",
+        "Writing Lab": "✍️ Writing Star",
+        "Reading Challenge": "📖 Reading Detective",
+    }
+    for world, badge in badge_rules.items():
+        stats = worlds.get(world, {})
+        if stats.get("correct", 0) >= 5:
+            badges.add(badge)
+    total_correct = sum(v.get("correct", 0) for v in worlds.values())
+    if total_correct >= 25:
+        badges.add("⭐ Consistent Learner")
+    if profile.get("streak", 0) >= 3:
+        badges.add("🔥 3-Day Streak")
+    profile["badges"] = sorted(badges)
+
+
+def update_streak(profile):
+    today = today_str()
+    last = profile.get("last_practice_date")
+    if last == today:
+        return
+    try:
+        if last:
+            d_last = date.fromisoformat(last)
+            if (date.today() - d_last).days == 1:
+                profile["streak"] = profile.get("streak", 0) + 1
+            else:
+                profile["streak"] = 1
+        else:
+            profile["streak"] = 1
+    except Exception:
+        profile["streak"] = 1
+    profile["last_practice_date"] = today
+
+
 def record_result(world, correct, question="", detail=""):
     data = user_progress()
     user = st.session_state.user
@@ -324,6 +429,10 @@ def record_result(world, correct, question="", detail=""):
     profile.setdefault("xp", 0)
     profile.setdefault("worlds", {})
     profile.setdefault("attempts", [])
+    profile.setdefault("error_bank", [])
+    profile.setdefault("daily", {})
+    update_streak(profile)
+
     w = profile["worlds"].setdefault(world, {"correct": 0, "wrong": 0})
     if correct:
         w["correct"] += 1
@@ -331,6 +440,20 @@ def record_result(world, correct, question="", detail=""):
     else:
         w["wrong"] += 1
         profile["xp"] += 2
+        profile["error_bank"].append({
+            "time": datetime.now().isoformat(timespec="seconds"),
+            "world": world,
+            "question": question[:160],
+            "your_answer": detail[:200],
+        })
+        profile["error_bank"] = profile["error_bank"][-250:]
+
+    d = profile["daily"].setdefault(today_str(), {"attempts": 0, "correct": 0, "worlds": {}})
+    d["attempts"] += 1
+    if correct:
+        d["correct"] += 1
+    d["worlds"][world] = d["worlds"].get(world, 0) + 1
+
     profile["attempts"].append({
         "time": datetime.now().isoformat(timespec="seconds"),
         "world": world,
@@ -338,8 +461,11 @@ def record_result(world, correct, question="", detail=""):
         "question": question[:160],
         "detail": detail[:200],
     })
-    profile["attempts"] = profile["attempts"][-250:]
+    profile["attempts"] = profile["attempts"][-400:]
+    calculate_badges(profile)
     save_json(PROGRESS_FILE, data)
+    mirror_attempt_sqlite(user, world, correct, question, detail)
+
 
 
 def get_stats(world=None):
@@ -397,6 +523,7 @@ def check_answer(q, response):
 
 
 def render_question(world, q, idx):
+    show_lives(world)
     st.markdown(f"#### Question {idx + 1}")
     st.write(q["q"])
     speak_button(q["q"], "🔊 Listen to question")
@@ -413,6 +540,7 @@ def render_question(world, q, idx):
             return
         correct = check_answer(q, response)
         record_result(world, correct, q["q"], str(response))
+        adjust_lives(world, correct)
         ans = q.get("answer")
         show_answer_feedback(correct, q.get("explain", "Keep practicing."), ans)
 
@@ -635,6 +763,208 @@ def study_cards():
                 st.write("**Example:** " + data["example"])
                 speak_button(idiom + ". " + data["example"], "🔊 Listen")
 
+
+# -----------------------------
+# PRO features: missions, weak areas, badges, profile
+# -----------------------------
+def all_world_names():
+    return list(QUIZ.keys()) + ["Writing Lab", "Reading Challenge"]
+
+
+def weak_areas_for_user(username=None):
+    data = load_json(PROGRESS_FILE)
+    username = username or st.session_state.user
+    profile = data.get(username, {})
+    rows = []
+    for world in all_world_names():
+        stats = profile.get("worlds", {}).get(world, {"correct": 0, "wrong": 0})
+        attempts = stats.get("correct", 0) + stats.get("wrong", 0)
+        accuracy = (stats.get("correct", 0) / attempts) if attempts else 0
+        priority = (1 - accuracy) * max(1, attempts) + (2 if attempts == 0 else 0)
+        rows.append({"World": world, "Correct": stats.get("correct", 0), "Wrong": stats.get("wrong", 0), "Attempts": attempts, "Accuracy %": round(accuracy * 100, 1), "Priority": round(priority, 2)})
+    return sorted(rows, key=lambda r: (-r["Priority"], r["Accuracy %"], r["Attempts"]))
+
+
+def current_lives(world):
+    key = f"lives_{world}"
+    if key not in st.session_state:
+        st.session_state[key] = 3
+    return st.session_state[key]
+
+
+def adjust_lives(world, correct):
+    key = f"lives_{world}"
+    if key not in st.session_state:
+        st.session_state[key] = 3
+    if correct:
+        st.session_state[key] = min(3, st.session_state[key] + 0)
+    else:
+        st.session_state[key] = max(0, st.session_state[key] - 1)
+
+
+def show_lives(world):
+    lives = current_lives(world)
+    st.markdown("<div class='heart'>Lives: " + "❤️" * lives + "🤍" * (3 - lives) + "</div>", unsafe_allow_html=True)
+    if lives == 0:
+        st.warning("No lives left in this round. You can continue practicing, but try reviewing the explanation first.")
+        if st.button("Reset lives for this world", key=f"reset_lives_{world}"):
+            st.session_state[f"lives_{world}"] = 3
+            st.rerun()
+
+
+def daily_missions():
+    return [
+        {"id": "grammar5", "title": "Complete 5 grammar questions", "target": 5, "worlds": ["Past Simple", "Past Continuous", "Prepositions of Time", "Adverbs", "Infinitives and Gerunds", "Present Continuous as Future", "Prepositions", "Adjectives Fact and Opinion"]},
+        {"id": "idioms3", "title": "Practice 3 idioms", "target": 3, "worlds": ["Idioms"]},
+        {"id": "writing1", "title": "Write 1 sentence", "target": 1, "worlds": ["Writing Lab"]},
+        {"id": "reading1", "title": "Do 1 reading activity", "target": 1, "worlds": ["Reading Challenge"]},
+    ]
+
+
+def mission_progress(profile, mission):
+    d = profile.get("daily", {}).get(today_str(), {"worlds": {}})
+    return sum(d.get("worlds", {}).get(w, 0) for w in mission["worlds"])
+
+
+def missions_page():
+    st.header("🎯 Daily Missions")
+    profile = get_stats()
+    st.caption("Complete missions to guide today's practice.")
+    for m in daily_missions():
+        done = mission_progress(profile, m)
+        pct = min(1.0, done / m["target"])
+        st.markdown(f"<div class='mission'><b>{m['title']}</b><br>{done}/{m['target']}</div>", unsafe_allow_html=True)
+        st.progress(pct)
+        if done >= m["target"]:
+            st.success("Mission complete! 🎁")
+
+
+def badges_page():
+    st.header("🏅 Badges")
+    profile = get_stats()
+    calculate_badges(profile)
+    badges = profile.get("badges", [])
+    if not badges:
+        st.info("No badges yet. Earn badges by getting 5 correct answers in a world.")
+    cols = st.columns(3)
+    for i, b in enumerate(badges):
+        with cols[i % 3]:
+            st.markdown(f"<div class='badge-card'><b>{html.escape(b)}</b></div>", unsafe_allow_html=True)
+
+
+def error_bank_page():
+    st.header("🧾 Error Bank")
+    profile = get_stats()
+    errors = list(reversed(profile.get("error_bank", [])[-100:]))
+    if not errors:
+        st.success("No errors saved yet. Great!")
+        return
+    st.dataframe(errors, use_container_width=True, hide_index=True)
+    st.caption("Use this list before the exam to review repeated mistakes.")
+
+
+def practice_weak_areas():
+    st.header("🎯 Practice My Weak Areas")
+    weak = weak_areas_for_user()[:5]
+    st.write("The app recommends practice based on your accuracy and attempts.")
+    st.dataframe(weak, use_container_width=True, hide_index=True)
+    available = [r["World"] for r in weak if r["World"] in QUIZ]
+    if not available:
+        st.info("Your weakest areas are Writing or Reading. Use those sections directly.")
+        return
+    world = st.selectbox("Practice recommended world", available)
+    q = random.choice(QUIZ[world])
+    show_lives(world)
+    render_question(world, q, 0)
+
+
+def grammar_map():
+    st.header("🗺️ Grammar Map")
+    rules = {
+        "Past Simple": ["Regular verbs often end in -ed.", "Irregular verbs change form: go → went, eat → ate.", "Questions use Did + subject + base verb."],
+        "Past Continuous": ["Use was/were + verb-ing.", "Example: I was reading at 8 p.m."],
+        "Prepositions of Time": ["IN: months, years, seasons, parts of the day.", "ON: days, dates, holidays.", "AT: clock times.", "No preposition: today, tomorrow, yesterday, next week, this weekend, last week, every weekend."],
+        "Adverbs": ["Manner: quickly, carefully, well.", "Time: yesterday, tomorrow."],
+        "Infinitives and Gerunds": ["Enjoy + gerund.", "Want/decide + infinitive.", "Like/love can use gerund or infinitive in this practice."],
+        "Present Continuous as Future": ["Use am/is/are + verb-ing + future expression.", "Example: I am meeting my friends tomorrow."],
+        "Prepositions": ["Examples: next to, in front of, behind, at, near.", "Questions: What are you looking for? Who are you talking to?"],
+        "Adjectives Fact and Opinion": ["Fact: size, age, material, shape.", "Opinion: beautiful, awful, amazing, boring."],
+    }
+    for topic, items in rules.items():
+        with st.expander(topic, expanded=False):
+            for it in items:
+                st.write("- " + it)
+
+
+def my_profile():
+    st.header("👤 My Profile")
+    users = load_json(USERS_FILE)
+    user = st.session_state.user
+    st.write(safe_user_record(user))
+    profile = get_stats()
+    render_level_box(profile.get("xp", 0))
+    st.metric("Current streak", f"{profile.get('streak', 0)} day(s)")
+    st.subheader("Change my password")
+    with st.form("my_password_form"):
+        current = st.text_input("Current password", type="password")
+        new1 = st.text_input("New password", type="password")
+        new2 = st.text_input("Repeat new password", type="password")
+        submitted = st.form_submit_button("Update password")
+        if submitted:
+            if users[user]["password"] != hash_password(current):
+                st.error("Current password is not correct.")
+            elif not new1 or len(new1) < 4:
+                st.warning("Use at least 4 characters.")
+            elif new1 != new2:
+                st.error("The new passwords do not match.")
+            else:
+                users[user]["password"] = hash_password(new1)
+                users[user]["password_changed_at"] = datetime.now().isoformat()
+                save_json(USERS_FILE, users)
+                st.success("Password updated.")
+
+
+def exam_mode():
+    st.header("🧪 Simulated Exam")
+    st.caption("Mixed topics, no hints before answering. This is for final review.")
+    if "exam_questions" not in st.session_state or st.button("Start new simulated exam"):
+        pool = []
+        for world, qs in QUIZ.items():
+            for q in qs:
+                pool.append((world, q))
+        random.shuffle(pool)
+        st.session_state.exam_questions = pool[:15]
+        st.session_state.exam_answers = {}
+    qs = st.session_state.exam_questions
+    with st.form("exam_form"):
+        for i, (world, q) in enumerate(qs):
+            st.markdown(f"**{i+1}. [{world}] {q['q']}**")
+            key = f"exam_{i}"
+            if q["type"] in ["mcq", "match", "classify", "tf"]:
+                st.radio("Choose one:", q["options"], key=key, index=None)
+            else:
+                st.text_input("Answer:", key=key)
+        submitted = st.form_submit_button("Submit exam")
+    if submitted:
+        correct = 0
+        rows = []
+        for i, (world, q) in enumerate(qs):
+            resp = st.session_state.get(f"exam_{i}", "")
+            ok = bool(resp) and check_answer(q, resp)
+            correct += int(ok)
+            record_result(world, ok, q["q"], str(resp))
+            rows.append({"#": i+1, "World": world, "Correct": ok, "Your answer": str(resp), "Expected": q.get("answer", "")})
+        score = round(correct / len(qs) * 100, 1)
+        if score >= 80:
+            st.balloons()
+            trigger_confetti()
+            play_success_sound()
+            st.success(f"Exam score: {score}%")
+        else:
+            st.warning(f"Exam score: {score}%. Review weak areas and try again.")
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
 # -----------------------------
 # Dashboard
 # -----------------------------
@@ -671,6 +1001,29 @@ def dashboard():
         st.subheader("Recent attempts")
         st.dataframe(list(reversed(attempts)), use_container_width=True, hide_index=True)
 
+
+
+def export_progress_excel():
+    try:
+        import pandas as pd
+        output = io.BytesIO()
+        users = load_json(USERS_FILE)
+        progress = load_json(PROGRESS_FILE)
+        summary = flatten_progress()
+        attempts = []
+        errors = []
+        for username, profile in progress.items():
+            for a in profile.get("attempts", []):
+                attempts.append({"User": username, **a})
+            for e in profile.get("error_bank", []):
+                errors.append({"User": username, **e})
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            pd.DataFrame(summary).to_excel(writer, index=False, sheet_name="Summary")
+            pd.DataFrame(attempts).to_excel(writer, index=False, sheet_name="Attempts")
+            pd.DataFrame(errors).to_excel(writer, index=False, sheet_name="Error bank")
+        return output.getvalue()
+    except Exception:
+        return None
 
 # -----------------------------
 # Admin Panel
@@ -758,6 +1111,20 @@ def admin_panel():
             weakest = sorted(summary_rows, key=lambda r: (r["Accuracy %"], -r["Attempts"]))[:5]
             st.subheader("Students who may need review")
             st.dataframe(weakest, use_container_width=True, hide_index=True)
+
+        st.subheader("Ranking")
+        ranking = sorted(summary_rows, key=lambda r: (-r["XP"], -r["Accuracy %"]))
+        st.dataframe(ranking, use_container_width=True, hide_index=True)
+
+        st.subheader("Most repeated errors")
+        error_rows = []
+        for username, profile in progress.items():
+            for e in profile.get("error_bank", []):
+                error_rows.append({"User": username, **e})
+        if error_rows:
+            st.dataframe(list(reversed(error_rows[-100:])), use_container_width=True, hide_index=True)
+        else:
+            st.info("No errors recorded yet.")
 
     with tab2:
         st.subheader("Statistics by world")
@@ -890,6 +1257,17 @@ def admin_panel():
             mime="text/csv",
             use_container_width=True,
         )
+        excel_data = export_progress_excel()
+        if excel_data:
+            st.download_button(
+                "Download progress Excel",
+                data=excel_data,
+                file_name="english_adventure_progress.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        else:
+            st.caption("Excel export requires pandas and openpyxl installed.")
         st.download_button(
             "Download raw progress JSON",
             data=json.dumps(progress, indent=2, ensure_ascii=False).encode("utf-8"),
@@ -910,6 +1288,7 @@ def admin_panel():
 # -----------------------------
 def home():
     st.title("🌍 English Adventure 7th Grade")
+    st.markdown("<div class='mascot'>🐱📚</div>", unsafe_allow_html=True)
     st.markdown("Hybrid practice app: game-style worlds + tutor-style feedback.")
     st.markdown("""
     <div class='card'>
@@ -936,7 +1315,7 @@ def app_shell():
         st.caption(role_badge)
         profile = get_stats()
         render_level_box(profile.get("xp", 0))
-        menu_items = ["Home", "Study Cards", "Dashboard"]
+        menu_items = ["Home", "My Profile", "Daily Missions", "Study Cards", "Grammar Map", "Dashboard", "Badges", "Error Bank", "Practice My Weak Areas", "Simulated Exam"]
         if is_admin():
             menu_items.append("Admin Panel")
         menu_items += list(QUIZ.keys()) + ["Writing Lab", "Reading Challenge"]
@@ -947,10 +1326,24 @@ def app_shell():
 
     if page == "Home":
         home()
+    elif page == "My Profile":
+        my_profile()
+    elif page == "Daily Missions":
+        missions_page()
     elif page == "Study Cards":
         study_cards()
+    elif page == "Grammar Map":
+        grammar_map()
     elif page == "Dashboard":
         dashboard()
+    elif page == "Badges":
+        badges_page()
+    elif page == "Error Bank":
+        error_bank_page()
+    elif page == "Practice My Weak Areas":
+        practice_weak_areas()
+    elif page == "Simulated Exam":
+        exam_mode()
     elif page == "Admin Panel":
         admin_panel()
     elif page == "Writing Lab":

@@ -51,3 +51,49 @@ streamlit run app.py
 - Las contraseñas se guardan como hash SHA-256, no como texto plano.
 - En Streamlit Cloud los archivos JSON pueden reiniciarse si se redeploya la app o si el entorno se reinicia. Para uso permanente se puede migrar a SQLite, Google Sheets o Supabase.
 - Los audios usan `speechSynthesis` del navegador; no requiere MP3 ni servicios externos.
+
+
+## Versión PRO
+
+Esta versión incorpora:
+
+1. Vidas/corazones por práctica.
+2. Badges/insignias automáticas.
+3. Ranking de usuarios.
+4. Rachas diarias.
+5. Misiones diarias.
+6. Modo adaptativo con áreas débiles.
+7. Banco de errores.
+8. Botón/sección Practice My Weak Areas.
+9. Examen simulado.
+10. Writing Lab mejorado.
+11. Reading Detective.
+12. Flashcards / Study Cards.
+13. Grammar Map.
+14. Dashboard admin ampliado.
+15. Exportación CSV, JSON y Excel.
+16. Mascota gato fija y feedback visual.
+17. Pantalla/efectos de logro con confetti, globos y sonido.
+18. SQLite para respaldo de intentos y analítica, además de almacenamiento JSON compatible.
+
+## Cambio de contraseña
+
+Ruta para cualquier usuario:
+`Sidebar > My Profile > Change my password`
+
+Ruta de administrador:
+`Sidebar > Admin Panel > Users > Manage existing user > Change password`
+
+## Usuario administrador por defecto
+
+- Usuario: `admin`
+- Contraseña: `admin123`
+
+Se recomienda cambiar la contraseña al primer ingreso.
+
+## Ejecutar
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
