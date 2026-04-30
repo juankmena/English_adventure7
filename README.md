@@ -110,3 +110,22 @@ También incluye modo de práctica tipo examen ocultando el Word Bank:
 
 - Vocabulary Unit 1 > Word Bank mode > Hide word bank / exam practice
 - Vocabulary Unit 2 > Word Bank mode > Hide word bank / exam practice
+
+
+## Voice Settings / Test Voice
+
+La app incluye una sección:
+
+```text
+Sidebar > Voice Settings
+```
+
+Use esa pantalla para probar si el dispositivo está usando una voz inglesa.
+
+En iPad, si se escucha como hispanohablante leyendo inglés, active o descargue una voz inglesa:
+
+```text
+Settings > Accessibility > Spoken Content > Voices > English
+```
+
+Recomendadas: Samantha, Alex, Google US English, Google UK English o Microsoft English voices.

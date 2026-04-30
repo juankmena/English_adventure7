@@ -1432,6 +1432,8 @@ def app_shell():
         grammar_map()
     elif page == "Dashboard":
         dashboard()
+    elif page == "Voice Settings":
+        voice_settings()
     elif page == "Badges":
         badges_page()
     elif page == "Error Bank":
@@ -1454,3 +1456,77 @@ if "user" not in st.session_state:
     auth_screen()
 else:
     app_shell()
+
+
+def speak_button(text, label="🔊 Listen"):
+    """Audio button with explicit English voice preference.
+
+    This fixes iPad/Safari cases where the browser chooses a Spanish voice
+    and reads English text with Spanish pronunciation.
+    """
+    safe_text = json.dumps(text)
+    button_id = "btn_" + hashlib.md5(text.encode("utf-8")).hexdigest()[:10]
+    preferred_names = [
+        "samantha", "alex", "daniel", "karen", "moira", "tessa",
+        "google us english", "google uk english",
+        "microsoft aria", "microsoft jenny", "microsoft guy",
+        "english"
+    ]
+    preferred_json = json.dumps(preferred_names)
+    st.components.v1.html(f"""
+        <button id="{button_id}" style="padding:8px 12px;border-radius:12px;border:1px solid #999;cursor:pointer;">
+            {html.escape(label)}
+        </button>
+        <script>
+        (function() {{
+            const button = document.getElementById('{button_id}');
+            const textToSpeak = {safe_text};
+            const preferredNames = {preferred_json};
+
+            function getEnglishVoice() {{
+                const voices = window.speechSynthesis.getVoices() || [];
+                if (!voices.length) return null;
+
+                const englishVoices = voices.filter(v => (v.lang || '').toLowerCase().startsWith('en'));
+                if (!englishVoices.length) return null;
+
+                return englishVoices.find(v =>
+                    preferredNames.some(name => (v.name || '').toLowerCase().includes(name))
+                ) || englishVoices.find(v => (v.lang || '').toLowerCase() === 'en-us')
+                   || englishVoices.find(v => (v.lang || '').toLowerCase() === 'en-gb')
+                   || englishVoices[0];
+            }}
+
+            function speakNow() {{
+                const msg = new SpeechSynthesisUtterance(textToSpeak);
+                const selectedVoice = getEnglishVoice();
+                if (selectedVoice) {{
+                    msg.voice = selectedVoice;
+                    msg.lang = selectedVoice.lang || 'en-US';
+                }} else {{
+                    msg.lang = 'en-US';
+                    alert('No English voice was detected on this device. On iPad: Settings > Accessibility > Spoken Content > Voices > English, then download Samantha or Alex.');
+                }}
+                msg.rate = 0.85;
+                msg.pitch = 1.0;
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.speak(msg);
+            }}
+
+            if (window.speechSynthesis.getVoices().length === 0) {{
+                window.speechSynthesis.onvoiceschanged = function() {{}};
+            }}
+            button.onclick = speakNow;
+        }})();
+        </script>
+    """, height=45)
+
+
+def voice_settings():
+    st.header("🔊 Voice Settings / Test Voice")
+    st.write("Use this page to test whether the device is using an English voice.")
+    st.info("On iPad, install an English voice here: Settings > Accessibility > Spoken Content > Voices > English. Recommended: Samantha or Alex.")
+    sample = st.text_area("Test text", "Hello! I am practicing English vocabulary, grammar, idioms, and reading.", height=90)
+    speak_button(sample, "🔊 Test English Voice")
+    st.caption("The app now prioritizes English voices such as Samantha, Alex, Google US English, Google UK English, and Microsoft English voices.")
+
