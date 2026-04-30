@@ -97,3 +97,16 @@ Se recomienda cambiar la contraseña al primer ingreso.
 pip install -r requirements.txt
 streamlit run app.py
 ```
+
+## Update: Word Bank en Vocabulary
+
+Esta versión incorpora Word Bank en:
+
+- Vocabulary Unit 1: banco general de palabras.
+- Vocabulary Unit 2: banco general y banco clasificado por Verbs, Places, Nouns y Adjectives / other words.
+- Writing Lab: banco de apoyo cuando la tarea corresponde a Unit 2 o Idioms.
+
+También incluye modo de práctica tipo examen ocultando el Word Bank:
+
+- Vocabulary Unit 1 > Word Bank mode > Hide word bank / exam practice
+- Vocabulary Unit 2 > Word Bank mode > Hide word bank / exam practice

@@ -39,6 +39,9 @@ CUSTOM_CSS = """
 .mission {border:1px solid rgba(120,120,120,.25); border-radius:14px; padding:12px; margin:8px 0;}
 .heart {font-size:1.3rem;}
 .badge-card {border-radius:14px; padding:12px; margin:8px 0; border:1px solid rgba(120,120,120,.25); background: rgba(255,255,255,.04);}
+.word-bank {border-radius:16px; padding:14px; margin:10px 0 16px 0; border:1px solid rgba(120,120,120,.25); background:linear-gradient(135deg, rgba(230,245,255,.75), rgba(255,255,255,.92));}
+.word-bank-title {font-weight:800; font-size:1.05rem; margin-bottom:6px;}
+.word-bank-section {font-weight:750; margin-top:8px; margin-bottom:2px;}
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -510,6 +513,97 @@ def auth_screen():
                 save_json(USERS_FILE, users)
                 st.success("User created. Now log in.")
 
+
+# -----------------------------
+# Word banks
+# -----------------------------
+UNIT2_WORD_BANK_GROUPS = {
+    "Verbs": ["pick up", "find out", "go shopping", "hang out", "go out"],
+    "Places": ["bookstore", "movie theater", "exhibition", "concert", "festival"],
+    "Nouns": ["magazine", "newspaper", "ticket", "advertisement", "hobby", "weekend", "photographer", "fun"],
+    "Adjectives / other words": ["brilliant", "free"],
+}
+
+
+def badge_list(words):
+    return " ".join([f"<span class='badge'>{html.escape(w)}</span>" for w in words])
+
+
+def render_word_bank(world):
+    if world not in ["Vocabulary Unit 1", "Vocabulary Unit 2"]:
+        return
+
+    st.markdown("### 🧺 Word Bank")
+    if world == "Vocabulary Unit 1":
+        mode = st.radio(
+            "Word Bank mode",
+            ["Show word bank", "Hide word bank / exam practice"],
+            horizontal=True,
+            key="unit1_word_bank_mode",
+        )
+        if mode.startswith("Show"):
+            st.markdown(
+                f"""
+                <div class='word-bank'>
+                    <div class='word-bank-title'>Vocabulary Unit 1</div>
+                    {badge_list(UNIT1_WORDS)}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            with st.expander("🔊 Listen to Unit 1 Word Bank"):
+                speak_button(". ".join(UNIT1_WORDS), "🔊 Listen to all Unit 1 words")
+        else:
+            st.info("Exam practice mode: Word Bank hidden.")
+
+    if world == "Vocabulary Unit 2":
+        mode = st.radio(
+            "Word Bank mode",
+            ["Show general word bank", "Show classified word bank", "Hide word bank / exam practice"],
+            horizontal=True,
+            key="unit2_word_bank_mode",
+        )
+        if mode == "Show general word bank":
+            st.markdown(
+                f"""
+                <div class='word-bank'>
+                    <div class='word-bank-title'>Vocabulary Unit 2</div>
+                    {badge_list(UNIT2_WORDS)}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            with st.expander("🔊 Listen to Unit 2 Word Bank"):
+                speak_button(". ".join(UNIT2_WORDS), "🔊 Listen to all Unit 2 words")
+        elif mode == "Show classified word bank":
+            sections = []
+            for group, words in UNIT2_WORD_BANK_GROUPS.items():
+                sections.append(f"<div class='word-bank-section'>{html.escape(group)}</div>{badge_list(words)}")
+            st.markdown(
+                f"""
+                <div class='word-bank'>
+                    <div class='word-bank-title'>Vocabulary Unit 2 — classified</div>
+                    {''.join(sections)}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.caption("This classification supports the Unit 2 practice: verbs, places, and nouns.")
+            with st.expander("🔊 Listen to Unit 2 classified Word Bank"):
+                speak_button(". ".join(UNIT2_WORDS), "🔊 Listen")
+        else:
+            st.info("Exam practice mode: Word Bank hidden.")
+
+
+def render_writing_word_bank(task):
+    if task.get("topic") == "Vocabulary Unit 2":
+        with st.expander("🧺 Unit 2 Word Bank for writing"):
+            st.markdown(badge_list(UNIT2_WORDS), unsafe_allow_html=True)
+            st.caption("Use only the words that the writing task asks for; this bank is just a reference.")
+    elif task.get("topic") == "Idioms":
+        with st.expander("🧺 Idioms Word Bank"):
+            st.markdown(badge_list(list(IDIOMS.keys())), unsafe_allow_html=True)
+
 # -----------------------------
 # Quiz engine
 # -----------------------------
@@ -549,6 +643,7 @@ def quiz_world(world):
     st.header(f"{WORLD_EMOJI.get(world, '🌍')} {world}")
     st.caption(WORLD_OBJECTIVE.get(world, "Practice."))
     questions = QUIZ[world]
+    render_word_bank(world)
     mode = st.radio("Practice mode", ["One by one", "Random question", "All questions"], horizontal=True)
 
     if mode == "Random question":
@@ -625,6 +720,7 @@ def writing_lab():
     st.markdown(f"**Topic:** {task['topic']}")
     st.write(task["instruction"])
     st.markdown("Required word(s): " + " ".join([f"<span class='badge'>{html.escape(w)}</span>" for w in task["words"]]), unsafe_allow_html=True)
+    render_writing_word_bank(task)
     with st.expander("Hint"):
         st.info(task["hint"])
     text = st.text_area("Your sentence", height=120)
